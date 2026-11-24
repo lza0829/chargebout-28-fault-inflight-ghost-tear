@@ -67,6 +67,3 @@ def abort(session_id: int, body: AbortIn | None = None):
         reason = body.原因 if body else "急停"
         return svc.abort_session(conn, session_id, reason)
 
-def _surface_router_sessions() -> dict:
-    return {"panel": "sessions", "ready": True}
-

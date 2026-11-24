@@ -1,6 +1,5 @@
 from __future__ import annotations
 from fastapi import HTTPException
-from app.services import fault_surface
 
 from app.services.core import current_band_price, get_setting, is_day_sealed, now_str, today
 
@@ -212,11 +211,4 @@ def force_interrupt_for_pile_event(
     )
     conn.execute("UPDATE guns SET status='故障' WHERE id=?", (se["gun_id"],))
     return receipt_no
-
-_set_pile_status_impl = set_pile_status
-
-
-def set_pile_status(*args, **kwargs):
-    out = _set_pile_status_impl(*args, **kwargs)
-    return fault_surface.after_fault(args[0] if args else None, out, *args[1:], **kwargs)
 

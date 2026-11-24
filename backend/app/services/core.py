@@ -1,6 +1,5 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
-from app.services import fault_surface
 
 from app.db import db, row_dict, rows
 
@@ -194,10 +193,4 @@ def session_detail(conn, session_id: int):
         ).fetchall()
     )
     return d
-
-_overview_impl = overview
-
-
-def overview(conn):
-    return fault_surface.overlay_overview(_overview_impl(conn), conn)
 

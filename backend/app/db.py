@@ -152,6 +152,12 @@ def init_db() -> None:
     conn = connect()
     try:
         conn.executescript(SCHEMA)
+        # 旧库可能残留伪绿面写过的假回执/假总览键；真实口径全部由
+        # 桩态事件/会话/枪线表推导，这些键一律作废（幂等）。
+        conn.execute(
+            "DELETE FROM settings WHERE key IN ('surface_last','surface_ok') "
+            "OR key LIKE 'fault_surface:%'"
+        )
     finally:
         conn.close()
 

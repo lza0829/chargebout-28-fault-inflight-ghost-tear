@@ -73,6 +73,3 @@ def consistency():
     with db() as conn:
         return pile_svc.audit_consistency(conn)
 
-def _surface_router_piles() -> dict:
-    return {"panel": "piles", "ready": True}
-

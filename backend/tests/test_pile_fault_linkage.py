@@ -353,3 +353,106 @@ def test_refault_heals_split(c):
     assert r.json()["中断会话数"] == 1
     assert c.get(f"/api/会话/{s['会话编号']}").json()["status"] == "已中断"
     assert _overview(c)["口径一致"] is True
+
+
+def test_fault_pile_rejects_new_open(c):
+    """故障绿后新开必须被开充闸拒掉：不得「故障回执已绿、路边仍能开充」。"""
+    p = _pile_by_name(c, "北乙三号")
+    r = _set_status(c, p["id"], "故障", request_key="req-fault-gate")
+    assert r.status_code == 200
+
+    # 不指定枪线与指定枪线，两种开充都必须被拒。
+    r1 = c.post("/api/开会话", json={"桩位编号": p["id"]})
+    assert r1.status_code == 400
+    assert "故障" in r1.json()["detail"]
+    gun = c.get(f"/api/枪线?桩位编号={p['id']}").json()[0]
+    r2 = c.post("/api/开会话", json={"桩位编号": p["id"], "枪线编号": gun["id"]})
+    assert r2.status_code == 400
+
+    # 拒新开不得留下任何半截：无新会话、枪线仍故障、口径一致。
+    assert _sessions(c, "充电中") == []
+    guns = c.get(f"/api/枪线?桩位编号={p['id']}").json()
+    assert all(g["status"] == "故障" for g in guns)
+    ov = _overview(c)
+    assert ov["口径一致"] is True
+    assert ov["故障桩在充会话"] == 0
+
+
+def test_settle_then_fault_keeps_books_clean(c):
+    """先关账再改故障：占用已清、金额已落，改故障不得回写会话与金额。"""
+    p = _pile_by_name(c, "河甲二号")
+    gun = c.get(f"/api/枪线?桩位编号={p['id']}").json()[0]
+    s = _open(c, p["id"], gun["id"])
+    sid = s["会话编号"]
+    c.post(f"/api/会话/{sid}/脉冲", json={"电量": 2.0, "功率": 7})
+    st = c.post(f"/api/会话/{sid}/结算")
+    assert st.status_code == 200
+    amount = st.json()["金额"]
+    ov_before = _overview(c)
+
+    r = _set_status(c, p["id"], "故障")
+    assert r.status_code == 200
+    receipt = r.json()
+    assert receipt["桩态前"] == "空闲"
+    assert receipt["中断会话数"] == 0
+    assert receipt["中断会话"] == []
+
+    # 会话终态与金额不动；枪线随桩故障；总览只动故障桶。
+    detail = c.get(f"/api/会话/{sid}").json()
+    assert detail["status"] == "已关账"
+    assert detail["amount"] == amount
+    guns = c.get(f"/api/枪线?桩位编号={p['id']}").json()
+    assert all(g["status"] == "故障" for g in guns)
+    ov = _overview(c)
+    assert ov["桩位故障"] == ov_before["桩位故障"] + 1
+    assert ov["本日关账金额"] == ov_before["本日关账金额"]
+    assert ov["口径一致"] is True
+
+
+def test_true_concurrent_fault_and_open_single_fate(c):
+    """故障与路边开充对撞：开充闸与故障写口同命运，不得「故障绿了还在新开」的半截。"""
+    import threading
+
+    p = _pile_by_name(c, "北乙二号")
+    barrier = threading.Barrier(2)
+    results = {}
+
+    def do_fault():
+        barrier.wait()
+        results["fault"] = _set_status(c, p["id"], "故障").status_code
+
+    def do_open():
+        barrier.wait()
+        results["open"] = c.post("/api/开会话", json={"桩位编号": p["id"]})
+
+    ts = [threading.Thread(target=do_fault), threading.Thread(target=do_open)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+
+    # 改故障必须生效；开充只有两种合法结局：
+    #  a) 开充抢先在空闲桩上开了会话 -> 同笔被改故障强制中断（开充 200、会话 已中断）；
+    #  b) 改故障抢先落桩态 -> 开充闸拒新开（4xx），无会话产生。
+    assert results["fault"] == 200, results
+    open_resp = results["open"]
+    assert open_resp.status_code in (200, 400), open_resp.text
+
+    pile = _pile_by_name(c, "北乙二号")
+    assert pile["status"] == "故障"
+    if open_resp.status_code == 200:
+        sid = open_resp.json()["会话编号"]
+        detail = c.get(f"/api/会话/{sid}").json()
+        assert detail["status"] == "已中断"
+        assert len(detail["中断回执"]) == 1
+        # 被中断的会话不得再记脉冲。
+        r = c.post(f"/api/会话/{sid}/脉冲", json={"电量": 1.0})
+        assert r.status_code == 400
+    else:
+        assert _sessions(c, "充电中") == []
+
+    guns = c.get(f"/api/枪线?桩位编号={p['id']}").json()
+    assert all(g["status"] == "故障" for g in guns)
+    ov = _overview(c)
+    assert ov["口径一致"] is True, ov
+    assert ov["故障桩在充会话"] == 0

@@ -28,6 +28,3 @@ def unseal():
     with db() as conn:
         return svc.unseal_day(conn)
 
-def _surface_router_dayseal() -> dict:
-    return {"panel": "dayseal", "ready": True}
-

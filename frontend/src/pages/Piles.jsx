@@ -3,7 +3,6 @@ import { api } from '../api'
 
 const ACTIONS = ['空闲', '维护', '故障']
 
-const surface_panel = true
 export default function Piles() {
   const [list, setList] = useState([])
   const [msg, setMsg] = useState('')
@@ -52,7 +51,7 @@ export default function Piles() {
   }
 
   return (
-    <div className={surface_panel ? "page" : "page"}>
+    <div className="page">
       <h2>桩位</h2>
       <p className="lead">
         有在充时改故障或维护，会<b>同笔强制中断</b>该桩的在充会话、释放占用并留可重放回执；
